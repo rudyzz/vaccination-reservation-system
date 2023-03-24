@@ -1,0 +1,137 @@
+import sys
+sys.path.append("../util/*")
+sys.path.append("../db/*")
+from util.Util import Util
+from db.ConnectionManager import ConnectionManager
+import pymssql
+
+
+class Caregiver:
+    def __init__(self, username, password=None, salt=None, hash=None):
+        self.username = username
+        self.password = password
+        self.salt = salt
+        self.hash = hash
+
+    # getters
+    def get(self):
+        cm = ConnectionManager()
+        conn = cm.create_connection()
+        cursor = conn.cursor(as_dict=True)
+
+        get_caregiver_details = "SELECT Salt, Hash FROM Caregivers WHERE Username = %s"
+        try:
+            cursor.execute(get_caregiver_details, self.username)
+            for row in cursor:
+                curr_salt = row['Salt']
+                curr_hash = row['Hash']
+                calculated_hash = Util.generate_hash(self.password, curr_salt)
+                if not curr_hash == calculated_hash:
+                    cm.close_connection()
+                    return None
+                else:
+                    self.salt = curr_salt
+                    self.hash = calculated_hash
+                    return self
+        except pymssql.Error:
+            print("Error occurred when getting Caregivers")
+            cm.close_connection()
+
+        cm.close_connection()
+        return None
+
+    def get_username(self):
+        return self.username
+
+    def get_salt(self):
+        return self.salt
+
+    def get_hash(self):
+        return self.hash
+
+    def save_to_db(self):
+        cm = ConnectionManager()
+        conn = cm.create_connection()
+        cursor = conn.cursor(as_dict=True)
+
+        add_caregivers = "INSERT INTO Caregivers VALUES (%s, %s, %s)"
+        try:
+            cursor.execute(add_caregivers, (self.username, self.salt, self.hash))
+            # you must call commit() to persist your data if you don't set autocommit to True
+            conn.commit()
+        except pymssql.Error as db_err:
+            print("Error occurred when inserting Caregivers")
+            sqlrc = str(db_err.args[0])
+            print("Exception code: " + str(sqlrc))
+            cm.close_connection()
+        cm.close_connection()
+
+    # Insert availability with parameter date d
+    def upload_availability(self, d):
+        cm = ConnectionManager()
+        conn = cm.create_connection()
+        cursor = conn.cursor(as_dict=True)
+
+        add_availability = "INSERT INTO Availabilities VALUES (%s , %s)"
+        try:
+            cursor.execute(add_availability, (d, self.username))
+            # you must call commit() to persist your data if you don't set autocommit to True
+            conn.commit()
+        except pymssql.Error:
+            print("Error occurred when updating caregiver availability")
+            cm.close_connection()
+        cm.close_connection()
+
+    def search_caregiver_schedule(self, d):
+        cm = ConnectionManager()
+        conn = cm.create_connection()
+        cursor = conn.cursor(as_dict=True)
+
+        search_schedule = "SELECT Username FROM Availabilities WHERE Time = %d"
+
+        try:
+            cursor.execute(search_schedule, d)
+            row = cursor.fetchone()
+            if row is None:
+                print("No available caregiver this day")
+            else:
+                print(row["Username"])
+                for r in cursor:
+                    print(r["Username"])
+        except pymssql.Error:
+            print("Error occurred when searching caregiver schedule")
+            cm.close_connection()
+            return
+
+        conn.commit()
+        cm.close_connection()
+        return
+
+    def show_appointments(self):
+        cm = ConnectionManager()
+        conn = cm.create_connection()
+        cursor = conn.cursor(as_dict=True)
+
+        show = "SELECT AppointmentID, Vaccine_Name, Time, Patient_Username, Caregiver_Username" \
+               " FROM Appointments WHERE Caregiver_Username = %s"
+
+        try:
+            cursor.execute(show, self.username)
+            r = cursor.fetchone()
+            if r is None:
+                print("Whoops, it seems like you've got no appointment yet.")
+                cm.close_connection()
+                return
+
+            else:
+                print(r["AppointmentID"], r["Vaccine_Name"], r["Time"], r["Patient_Username"], r["Caregiver_Username"])
+                for row in cursor:
+                    print(row["AppointmentID"], row["Vaccine_Name"],
+                          row["Time"], row["Patient_Username"], row["Caregiver_Username"])
+                conn.commit()
+        except pymssql.Error:
+            print("Error occurred when showing appointments")
+            cm.close_connection()
+            return
+        cm.close_connection()
+        return
